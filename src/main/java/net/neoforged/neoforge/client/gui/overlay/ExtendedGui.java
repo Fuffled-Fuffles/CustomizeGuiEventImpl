@@ -30,6 +30,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.scores.DisplaySlot;
 import net.minecraft.world.scores.Objective;
+import net.neoforged.neoforge.client.event.CustomizeGuiOverlayElementEvent;
 import net.neoforged.neoforge.client.event.CustomizeGuiOverlayEvent;
 import net.neoforged.neoforge.client.event.RenderGuiEvent;
 import net.neoforged.neoforge.client.event.RenderGuiOverlayEvent;
@@ -174,13 +175,10 @@ public class ExtendedGui extends Gui {
 
         int level = minecraft.player.getArmorValue();
         for (int i = 1; level > 0 && i < 20; i += 2) {
-            if (i < level) {
-                guiGraphics.blitSprite(ARMOR_FULL_SPRITE, left, top, 9, 9);
-            } else if (i == level) {
-                guiGraphics.blitSprite(ARMOR_HALF_SPRITE, left, top, 9, 9);
-            } else {
-                guiGraphics.blitSprite(ARMOR_EMPTY_SPRITE, left, top, 9, 9);
-            }
+            GuiElementState guiState = GuiElementState.calculate(i, level);
+            var event = new CustomizeGuiOverlayElementEvent.Armor(minecraft.getWindow(), guiGraphics, random, tickCount, (i - 1) / 2, guiState.pick(ARMOR_EMPTY_SPRITE, ARMOR_HALF_SPRITE, ARMOR_FULL_SPRITE), left, top, 9, 9, guiState);
+            if (!NeoForge.EVENT_BUS.post(event).isCanceled() && event.getTexture() != null)
+                guiGraphics.blitSprite(event.getTexture(), event.getPosX(), event.getPosY(), event.getWidth(), event.getHeight());
             left += 8;
         }
         leftHeight += 10;
@@ -208,8 +206,12 @@ public class ExtendedGui extends Gui {
             int full = Mth.ceil((double) (air - 2) * 10.0D / 300.0D);
             int partial = Mth.ceil((double) air * 10.0D / 300.0D) - full;
 
+            //There is some bizzare behavior with respiration randomly returning the bubble and popping it again, but that's apparently just vanilla?
             for (int i = 0; i < full + partial; ++i) {
-                guiGraphics.blitSprite(i < full ? AIR_SPRITE : AIR_BURSTING_SPRITE, left - i * 8 - 9, top, 9, 9);
+                GuiElementState guiState = i < full ? GuiElementState.FULL : GuiElementState.HALF; //Is this stretching the definition of bursting? probably
+                var event = new CustomizeGuiOverlayElementEvent.Air(minecraft.getWindow(), guiGraphics, random, tickCount, i, guiState.pick(null, AIR_BURSTING_SPRITE, AIR_SPRITE), left - i * 8 - 9, top, 9, 9, guiState);
+                if (!NeoForge.EVENT_BUS.post(event).isCanceled() && event.getTexture() != null)
+                    guiGraphics.blitSprite(event.getTexture(), event.getPosX(), event.getPosY(), event.getWidth(), event.getHeight());
             }
             rightHeight += 10;
         }
@@ -268,6 +270,55 @@ public class ExtendedGui extends Gui {
         minecraft.getProfiler().pop();
     }
 
+    @Override
+    protected void renderHearts(GuiGraphics guiGraphics, Player player, int left, int top, int rowHeight, int regen, float healthMax, int health, int healthLast, int absorb, boolean highlight) {
+        Gui.HeartType vanillaHeartType = Gui.HeartType.forPlayer(player);
+        Gui.HeartType absorptionHeartType = vanillaHeartType == Gui.HeartType.WITHERED ? vanillaHeartType : HeartType.ABSORBING;
+        boolean isHardcore = player.level().getLevelData().isHardcore();
+        int maxHealth = Mth.ceil((double) healthMax / 2.0);
+        int absorption = Mth.ceil((double) absorb / 2.0);
+
+        for (int i = maxHealth + absorption - 1; i >= 0; --i) {
+            int x = left + i % 10 * 8;
+            int y = top - i / 10 * rowHeight;
+            int idx = i * 2 + 1;
+            int absorbIdx = idx - maxHealth * 2;
+
+            int lowHealthBobOffset = 0;
+            if (health + absorb <= 4) {
+                lowHealthBobOffset += this.random.nextInt(2);
+            }
+            int regenWaveOffset = 0;
+            if (i < maxHealth && i == regen) {
+                regenWaveOffset -= 2;
+            }
+
+            if (i >= maxHealth && absorbIdx <= absorb) {
+                GuiElementState guiState = GuiElementState.calculate(absorbIdx, absorb);
+                var event = new CustomizeGuiOverlayElementEvent.Absorption(this.minecraft.getWindow(), guiGraphics, this.random, this.tickCount, i, Gui.HeartType.CONTAINER.getSprite(isHardcore, false, highlight), absorptionHeartType.getSprite(isHardcore, guiState == GuiElementState.HALF, false), x, y, 9, 9, guiState, highlight, lowHealthBobOffset);
+                if (!NeoForge.EVENT_BUS.post(event).isCanceled()) {
+                    if (event.getContainerTexture() != null)
+                        guiGraphics.blitSprite(event.getContainerTexture(), event.getPosX(), event.getPosY() + event.getLowHealthBobOffset(), event.getWidth(), event.getHeight());
+                    if (event.getTexture() != null)
+                        guiGraphics.blitSprite(event.getTexture(), event.getPosX(), event.getPosY() + event.getLowHealthBobOffset(), event.getWidth(), event.getHeight());
+                }
+                continue;
+            }
+            GuiElementState highlightGuiState = GuiElementState.calculate(idx, healthLast);
+            GuiElementState guiState = GuiElementState.calculate(idx, health);
+            var event = new CustomizeGuiOverlayElementEvent.Health(this.minecraft.getWindow(), guiGraphics, this.random, this.tickCount, i, Gui.HeartType.CONTAINER.getSprite(isHardcore, false, highlight), vanillaHeartType.getSprite(isHardcore, guiState == GuiElementState.HALF, false), vanillaHeartType.getSprite(isHardcore, highlightGuiState == GuiElementState.HALF, true), x, y, 9, 9, highlightGuiState, guiState, highlight, lowHealthBobOffset, regenWaveOffset);
+            if (NeoForge.EVENT_BUS.post(event).isCanceled())
+                continue;
+
+            if (event.getContainerTexture() != null)
+                guiGraphics.blitSprite(event.getContainerTexture(), event.getPosX(), event.getPosY() + event.getLowHealthBobOffset() + event.getRegenerationWaveOffset(), event.getWidth(), event.getHeight());
+            if (highlight && highlightGuiState != GuiElementState.EMPTY && event.getHighlightTexture() != null)
+                guiGraphics.blitSprite(event.getHighlightTexture(), event.getPosX(), event.getPosY() + event.getLowHealthBobOffset() + event.getRegenerationWaveOffset(), event.getWidth(), event.getHeight());
+            if (guiState != GuiElementState.EMPTY && event.getTexture() != null)
+                guiGraphics.blitSprite(event.getTexture(), event.getPosX(), event.getPosY() + event.getLowHealthBobOffset() + event.getRegenerationWaveOffset(), event.getWidth(), event.getHeight());
+        }
+    }
+
     public void renderFood(int width, int height, GuiGraphics guiGraphics) {
         minecraft.getProfiler().push("food");
 
@@ -299,16 +350,20 @@ public class ExtendedGui extends Gui {
                 full = FOOD_FULL_SPRITE;
             }
 
+            int starvationBob = 0;
             if (player.getFoodData().getSaturationLevel() <= 0.0F && tickCount % (level * 3 + 1) == 0) {
-                y = top + (random.nextInt(3) - 1);
+                starvationBob += random.nextInt(3) - 1;
             }
 
-            guiGraphics.blitSprite(empty, x, y, 9, 9);
+            GuiElementState guiState = GuiElementState.calculate(idx, level);
+            var event = new CustomizeGuiOverlayElementEvent.Hunger(minecraft.getWindow(), guiGraphics, random, tickCount, i, empty, guiState.pick(null, half, full), x, y, 9, 9, guiState, starvationBob);
+            if (NeoForge.EVENT_BUS.post(event).isCanceled())
+                continue;
 
-            if (idx < level)
-                guiGraphics.blitSprite(full, x, y, 9, 9);
-            else if (idx == level)
-                guiGraphics.blitSprite(half, x, y, 9, 9);
+            if (event.getContainerTexture() != null)
+                guiGraphics.blitSprite(event.getContainerTexture(), event.getPosX(), event.getPosY() + event.getStarvationBobOffset(), event.getWidth(), event.getHeight());
+            if (event.getTexture() != null && guiState != GuiElementState.EMPTY)
+                guiGraphics.blitSprite(event.getTexture(), event.getPosX(), event.getPosY() + event.getStarvationBobOffset(), event.getWidth(), event.getHeight());
         }
         RenderSystem.disableBlend();
         minecraft.getProfiler().pop();
@@ -474,12 +529,16 @@ public class ExtendedGui extends Gui {
 
             for (int i = 0; i < rowCount; ++i) {
                 int x = left_align - i * 8 - 9;
-                guiGraphics.blitSprite(HEART_VEHICLE_CONTAINER_SPRITE, x, top, 9, 9);
 
-                if (i * 2 + 1 + heart < health)
-                    guiGraphics.blitSprite(HEART_VEHICLE_FULL_SPRITE, x, top, 9, 9);
-                else if (i * 2 + 1 + heart == health)
-                    guiGraphics.blitSprite(HEART_VEHICLE_HALF_SPRITE, x, top, 9, 9);
+                GuiElementState guiState = GuiElementState.calculate(i * 2 + 1 + heart, health);
+                var event = new CustomizeGuiOverlayElementEvent.MountHealth(minecraft.getWindow(), guiGraphics, random, tickCount, i + heart / 2, HEART_VEHICLE_CONTAINER_SPRITE, guiState.pick(null, HEART_VEHICLE_HALF_SPRITE, HEART_VEHICLE_FULL_SPRITE), x, top, 9, 9, guiState);
+                if (NeoForge.EVENT_BUS.post(event).isCanceled())
+                    continue;
+
+                if (event.getContainerTexture() != null)
+                    guiGraphics.blitSprite(event.getContainerTexture(), event.getPosX(), event.getPosY(), event.getWidth(), event.getHeight());
+                if (event.getTexture() != null && guiState != GuiElementState.EMPTY)
+                    guiGraphics.blitSprite(event.getTexture(), event.getPosX(), event.getPosY(), event.getWidth(), event.getHeight());
             }
 
             rightHeight += 10;

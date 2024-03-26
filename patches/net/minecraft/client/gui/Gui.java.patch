@@ -68,3 +68,21 @@
                  this.toolHighlightTimer = (int)(40.0 * this.minecraft.options.notificationDisplayTime().get());
              } else if (this.toolHighlightTimer > 0) {
                  --this.toolHighlightTimer;
+@@ -1230,7 +_,7 @@
+     }
+ 
+     @OnlyIn(Dist.CLIENT)
+-    static enum HeartType {
++    protected static enum HeartType {
+         CONTAINER(
+             new ResourceLocation("hud/heart/container"),
+             new ResourceLocation("hud/heart/container_blinking"),
+@@ -1335,7 +_,7 @@
+             }
+         }
+ 
+-        static Gui.HeartType forPlayer(Player p_168733_) {
++        public static Gui.HeartType forPlayer(Player p_168733_) {
+             Gui.HeartType gui$hearttype;
+             if (p_168733_.hasEffect(MobEffects.POISON)) {
+                 gui$hearttype = POISIONED;
